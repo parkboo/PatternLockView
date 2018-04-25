@@ -4,11 +4,17 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.res.Resources;
 import android.content.res.TypedArray;
+import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.Shader;
 import android.os.Build;
 import android.os.Debug;
 import android.os.Parcel;
@@ -18,6 +24,8 @@ import android.support.annotation.ColorInt;
 import android.support.annotation.Dimension;
 import android.support.annotation.IntDef;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
@@ -33,6 +41,7 @@ import com.andrognito.patternlockview.utils.ResourceUtils;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 import static com.andrognito.patternlockview.PatternLockView.AspectRatio.ASPECT_RATIO_HEIGHT_BIAS;
@@ -131,6 +140,8 @@ public class PatternLockView extends View {
     private List<PatternLockViewListener> mPatternListeners;
     // The pattern represented as a list of connected {@link Dot}
     private ArrayList<Dot> mPattern;
+    private BitmapShader mBitmapShader;
+    private final Paint mBitmapPaint = new Paint();
 
     /**
      * Lookup table for the dots of the pattern we are currently drawing.
@@ -158,6 +169,9 @@ public class PatternLockView extends View {
 
     private Interpolator mFastOutSlowInInterpolator;
     private Interpolator mLinearOutSlowInInterpolator;
+
+    // custom dot images
+    private HashMap<Integer, Bitmap> mBitmaps = new HashMap<>();
 
     public PatternLockView(Context context) {
         this(context, null);
@@ -215,6 +229,8 @@ public class PatternLockView extends View {
 
     private void initView() {
         setClickable(true);
+
+        mBitmapPaint.setAntiAlias(true);
 
         mPathPaint = new Paint();
         mPathPaint.setAntiAlias(true);
@@ -314,19 +330,6 @@ public class PatternLockView extends View {
         Path currentPath = mCurrentPath;
         currentPath.rewind();
 
-        // Draw the dots
-        for (int i = 0; i < sDotCount; i++) {
-            float centerY = getCenterYForRow(i);
-            for (int j = 0; j < sDotCount; j++) {
-                DotState dotState = mDotStates[i][j];
-                float centerX = getCenterXForColumn(j);
-                float size = dotState.mSize * dotState.mScale;
-                float translationY = dotState.mTranslateY;
-                drawCircle(canvas, (int) centerX, (int) centerY + translationY,
-                        size, drawLookupTable[i][j], dotState.mAlpha);
-            }
-        }
-
         // Draw the path of the pattern (unless we are in stealth mode)
         boolean drawPath = !mInStealthMode;
         if (drawPath) {
@@ -374,6 +377,19 @@ public class PatternLockView extends View {
                 mPathPaint.setAlpha((int) (calculateLastSegmentAlpha(
                         mInProgressX, mInProgressY, lastX, lastY) * 255f));
                 canvas.drawPath(currentPath, mPathPaint);
+            }
+        }
+
+        // Draw the dots
+        for (int i = 0; i < sDotCount; i++) {
+            float centerY = getCenterYForRow(i);
+            for (int j = 0; j < sDotCount; j++) {
+                DotState dotState = mDotStates[i][j];
+                float centerX = getCenterXForColumn(j);
+                float size = dotState.mSize * dotState.mScale;
+                float translationY = dotState.mTranslateY;
+                drawCircle(canvas, i*3+j, (int) centerX, (int) centerY + translationY,
+                        size, drawLookupTable[i][j], dotState.mAlpha);
             }
         }
     }
@@ -1135,11 +1151,18 @@ public class PatternLockView extends View {
         }
     }
 
-    private void drawCircle(Canvas canvas, float centerX, float centerY,
+    private void drawCircle(Canvas canvas, int index, float centerX, float centerY,
                             float size, boolean partOfPattern, float alpha) {
         mDotPaint.setColor(getCurrentColor(partOfPattern));
         mDotPaint.setAlpha((int) (alpha * 255));
         canvas.drawCircle(centerX, centerY, size / 2, mDotPaint);
+
+        if( index < mBitmaps.size() ) {
+            Bitmap bitmap = mBitmaps.get(index);
+            if( bitmap != null ) {
+                canvas.drawBitmap(bitmap, centerX-size/2, centerY-size/2, mDotPaint);
+            }
+        }
     }
 
     /**
@@ -1349,5 +1372,43 @@ public class PatternLockView extends View {
         float mLineEndX = Float.MIN_VALUE;
         float mLineEndY = Float.MIN_VALUE;
         ValueAnimator mLineAnimator;
+    }
+
+    public void clearBitmap() {
+        mBitmaps.clear();
+    }
+
+    public static float convertDpToPixel(Context context, float dp) {
+        Resources resources = context.getResources();
+        DisplayMetrics metrics = resources.getDisplayMetrics();
+        float px = dp * (metrics.densityDpi / 160f);
+        return px;
+    }
+
+    public void addBitmap(int index, Bitmap bitmap) {
+        // 원형은 fhd 기준 110x110
+        int size = mDotNormalSize;
+        Bitmap output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        // 테두리 제외 내부 크기는 100x100
+        int borderWidth = (int)convertDpToPixel(getContext(), 2.5f);
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size-borderWidth*2, size-borderWidth*2, true);
+        Canvas c = new Canvas(output);
+        // 테두리 그리기
+        Paint paint = new Paint();
+        paint.setColor(0XFFFFFFFF);
+        c.drawCircle(size/2, size/2, size/2, paint);
+
+        Bitmap output2 = Bitmap.createBitmap(scaled.getWidth(), scaled.getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas c2 = new Canvas(output2);
+        paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(0XFF000000);
+        c2.drawCircle(size/2, size/2, size/2-borderWidth, paint);
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+        c2.drawBitmap(scaled, borderWidth, borderWidth, paint);
+
+        // 마스크 처리된 원형 이미지를 흰 원 위에 그리기
+        c.drawBitmap(output2, 0, 0, paint);
+
+        mBitmaps.put(index, output);
     }
 }
