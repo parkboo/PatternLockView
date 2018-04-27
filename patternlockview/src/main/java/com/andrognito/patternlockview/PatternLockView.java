@@ -1391,7 +1391,22 @@ public class PatternLockView extends View {
         Bitmap output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         // 테두리 제외 내부 크기는 100x100
         int borderWidth = (int)convertDpToPixel(getContext(), 2.5f);
-        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size-borderWidth*2, size-borderWidth*2, true);
+        // 정사각형으로 자르기
+        if( bitmap.getWidth() != bitmap.getHeight() ) {
+            int x=0;
+            int y=0;
+            int width = 0;
+            if( bitmap.getWidth() > bitmap.getHeight() ) {
+                // 가로로 긴 경우
+                width = bitmap.getHeight();
+                x = (bitmap.getWidth() - width)/2;
+            } else {
+                width = bitmap.getWidth();
+                y = (bitmap.getHeight() - width)/2;
+            }
+            bitmap = Bitmap.createBitmap(bitmap, x, y, width, width);
+        }
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size-borderWidth, size-borderWidth, true);
         Canvas c = new Canvas(output);
         // 테두리 그리기
         Paint paint = new Paint();
